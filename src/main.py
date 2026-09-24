@@ -25,23 +25,23 @@ class TransformerBlock(nn.Module):
         self.d_model = d_model
         self.lm_head =  nn.Linear(d_model, vocab_size)
 
-    def forward(self, x):
+    def forward(self, x, attention_mask=None):
         Q = self.WQ(x)
         K = self.WK(x)
         V = self.WV(x)
 
         scores = Q @ K.transpose(-2, -1)
-        # print("\nScores:")
-        # print(scores)
-
         scores = scores / math.sqrt(self.d_model)
 
-        # print("\nScaled scores:")
-        # print(scores)
+        if attention_mask is not None:
+            scores = scores.masked_fill(
+                ~attention_mask,
+                float("-inf")
+            )
 
         weights = torch.softmax(scores, dim=-1)
 
-        # print("\nAttention weights:")
+        # print("--- Attention weights ---")
         # print(weights)
         # print("shape:", weights.shape)
         # print("row sums:", weights.sum(dim=-1))
@@ -91,81 +91,146 @@ class TransformerBlock(nn.Module):
         return logits
 
 
-vocab = {
-    "the" : 0,
-    "cat" : 1,
-    "eats" : 2,
-    "fish" : 3,
-    "<eos>": 4,
-}
+tokens = [
+    "the", "cat", "dog", "bird", "fish",
+    "eats", "sees", "likes", "chases",
+    "runs", "sleeps", "is",
+    "small", "big", "red", "blue",
+    "fast", "slow",
+    "in", "on", "near",
+    "house", "garden", "water",
+    "<eos>",
+    "<pad>",
+]
 
-tokenizer = Tokenizer(vocab)
+tokenizer = Tokenizer(tokens)
+
+print(tokenizer.vocab)
+print(tokenizer.id_to_token)
 
 embedding = nn.Embedding(
-    num_embeddings=len(vocab),
+    num_embeddings=len(tokenizer.vocab),
     embedding_dim=4
 )
 
-text = "the cat eats fish"
+texts = [
+    "the cat eats fish",
+    "the dog eats fish",
+    "the bird eats fish",
+    "the cat sees dog",
+    "the dog sees cat",
+    "the bird sees fish",
+    "the cat likes dog",
+    "the dog likes cat",
+    "the cat chases bird",
+    "the dog chases cat",
 
-ids, target = tokenizer.prepare(text)
-print("ids:   ", ids)
-print("target:", target)
+    "the cat runs fast",
+    "the dog runs fast",
+    "the bird runs fast",
+    "the cat runs slow",
+    "the dog runs slow",
+
+    "the cat sleeps",
+    "the dog sleeps",
+    "the bird sleeps",
+
+    "the cat is small",
+    "the dog is big",
+    "the bird is small",
+
+    "the cat is red",
+    "the dog is blue",
+    "the bird is red",
+
+    "the cat is in house",
+    "the dog is in house",
+    "the bird is in garden",
+
+    "the cat is near water",
+    "the dog is near house",
+    "the bird is near garden",
+]
+
+dataset = []
+
+for text in texts:
+    ids, target, attention_mask = tokenizer.prepare(text, max_len=5)
+    dataset.append((ids, target, attention_mask))
 
 block = TransformerBlock(
     d_model=4,
-    ff_dim=8
+    ff_dim=8,
+    vocab_size=len(tokenizer.vocab)
 )
-criterion = nn.CrossEntropyLoss()
+criterion = nn.CrossEntropyLoss(
+    ignore_index=tokenizer.pad_id
+)
 optimizer = torch.optim.AdamW(
     list(embedding.parameters()) + list(block.parameters()),
     lr=0.001
 )
 
-for step in range(1000):
-    # =========================
-    # 0. Обнуляем старые градиенты
-    # =========================
-    optimizer.zero_grad()
+for step in range(100):
+    total_loss = 0
 
-    # =========================
-    # 1. Token IDs → Embeddings
-    # =========================
-    x = embedding(ids)
+    for ids, target, attention_mask in dataset:
+        # =========================
+        # 0. Обнуляем старые градиенты
+        # =========================
+        optimizer.zero_grad()
 
-    print("\n--- Input embeddings ---")
-    print(x)
-    print("shape:", x.shape)
+        # =========================
+        # 1. Token IDs → Embeddings
+        # =========================
+        x = embedding(ids)
 
-    # =========================
-    # 2. Transformer Forward
-    # =========================
-    logits = block(x)
+        # print("\n--- Input embeddings ---")
+        # print(x)
+        # print("shape:", x.shape)
 
-    # =========================
-    # 3. Loss
-    # =========================
-    loss = criterion(logits, target)
+        # =========================
+        # 2. Transformer Forward
+        # =========================
+        logits = block(
+            x,
+            attention_mask=attention_mask
+        )
 
-    # =========================
-    # 4. Backpropagation
-    # =========================
-    loss.backward()
+        # =========================
+        # 3. Loss
+        # =========================
+        loss = criterion(logits, target)
 
-    # =========================
-    # 5. Update weights
-    # =========================
-    optimizer.step()
+        # =========================
+        # 4. Backpropagation
+        # =========================
+        loss.backward()
 
-    # =========================
-    # 6. Print loss
-    # =========================
-    if step % 100 == 0:
-        print(f"step={step}, loss={loss.item():.4f}")
+        # =========================
+        # 5. Update weights
+        # =========================
+        optimizer.step()
+
+        # =========================
+        # 6. Print loss
+        # =========================
+        total_loss += loss.item()
+
+    if step % 10 == 0:
+        print(
+            f"step={step}, "
+            f"loss={total_loss / len(dataset):.4f}"
+        )
+
+ids, target, attention_mask = dataset[0]
 
 with torch.no_grad():
     x = embedding(ids)
-    logits = block(x)
+    logits = block(
+        x,
+        attention_mask=attention_mask
+    )
     print("\n--- Logits ---")
     print(logits)
     print("shape:", logits.shape)
