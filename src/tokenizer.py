@@ -36,8 +36,9 @@ class Tokenizer:
 
     def decode(self, ids):
         tokens = [
-            self.id_to_token[id]
+            self.id_to_token[id.item()]
             for id in ids
+            if id.item() != self.pad_id
         ]
 
         return " ".join(tokens)

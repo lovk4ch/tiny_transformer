@@ -5,6 +5,8 @@ import torch.nn as nn
 from src.tokenizer import Tokenizer
 
 
+EMBEDDING_SIZE = 4
+
 class TransformerBlock(nn.Module):
     def __init__(self, d_model=4, ff_dim=8, vocab_size=5):
         super().__init__()
@@ -41,46 +43,17 @@ class TransformerBlock(nn.Module):
 
         weights = torch.softmax(scores, dim=-1)
 
-        # print("--- Attention weights ---")
-        # print(weights)
-        # print("shape:", weights.shape)
-        # print("row sums:", weights.sum(dim=-1))
-
         attention = weights @ V
-
-        # print("\nAttention output:")
-        # print(attention)
-        # print("shape:", attention.shape)
 
         x = x + attention
 
-        # print("\n--- After residual: ---")
-        # print(x)
-        # print("shape:", x.shape)
-
         x = self.norm1(x)
-
-        # print("\n--- After LayerNorm: ---")
-        # print(x)
-        # print("shape:", x.shape)
 
         ff_output = self.ff(x)
 
-        # print("\n--- FFN output: ---")
-        # print(ff_output)
-        # print("shape:", ff_output.shape)
-
         x = x + ff_output
 
-        # print("\n--- After FFN residual ---")
-        # print(x)
-        # print("shape:", x.shape)
-
         x = self.norm2(x)
-
-        # print("\n--- Final block output ---")
-        # print(x)
-        # print("shape:", x.shape)
 
         logits = self.lm_head(x)
 
@@ -105,12 +78,9 @@ tokens = [
 
 tokenizer = Tokenizer(tokens)
 
-print(tokenizer.vocab)
-print(tokenizer.id_to_token)
-
 embedding = nn.Embedding(
     num_embeddings=len(tokenizer.vocab),
-    embedding_dim=4
+    embedding_dim=EMBEDDING_SIZE
 )
 
 texts = [
@@ -154,12 +124,12 @@ texts = [
 
 dataset = []
 
-for text in texts:
+for text in texts[:4]:
     ids, target, attention_mask = tokenizer.prepare(text, max_len=5)
     dataset.append((ids, target, attention_mask))
 
 block = TransformerBlock(
-    d_model=4,
+    d_model=EMBEDDING_SIZE,
     ff_dim=8,
     vocab_size=len(tokenizer.vocab)
 )
@@ -171,7 +141,7 @@ optimizer = torch.optim.AdamW(
     lr=0.001
 )
 
-for step in range(100):
+for step in range(1000):
     total_loss = 0
 
     for ids, target, attention_mask in dataset:
@@ -184,10 +154,6 @@ for step in range(100):
         # 1. Token IDs → Embeddings
         # =========================
         x = embedding(ids)
-
-        # print("\n--- Input embeddings ---")
-        # print(x)
-        # print("shape:", x.shape)
 
         # =========================
         # 2. Transformer Forward
@@ -217,26 +183,26 @@ for step in range(100):
         # =========================
         total_loss += loss.item()
 
-    if step % 10 == 0:
+    if step % 100 == 0:
         print(
             f"step={step}, "
             f"loss={total_loss / len(dataset):.4f}"
         )
 
-ids, target, attention_mask = dataset[0]
+ids, _, attention_mask = dataset[3]
+ids = ids[:-2]
+print(tokenizer.decode(ids))
+attention_mask = attention_mask[:-2]
 
 with torch.no_grad():
-    x = embedding(ids)
-    logits = block(
-        x,
-        attention_mask=attention_mask
-    )
-    print("\n--- Logits ---")
-    print(logits)
-    print("shape:", logits.shape)
-    predictions = logits.argmax(dim=-1)
-    probabilities = torch.softmax(logits, dim=-1)
+    for i in range(3):
+        x = embedding(ids)
+        logits = block(
+            x,
+            attention_mask=attention_mask
+        )
 
-print("\n--- Probabilities ---")
-for row in probabilities:
-    print(" ".join(f"{p.item():.2f}" for p in row))
+        next_token_logits = logits[-1]
+        next_token_probs = torch.softmax(next_token_logits, dim=-1)
+        next_token_id = next_token_logits.argmax(dim=-1)
+        print(tokens[next_token_id])
