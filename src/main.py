@@ -1,10 +1,12 @@
 import math
+import os
+
 import torch
 import torch.nn as nn
 
 from src.tokenizer import Tokenizer
 
-
+IS_TRAIN = False
 EMBEDDING_SIZE = 4
 
 class TransformerBlock(nn.Module):
@@ -35,6 +37,24 @@ class TransformerBlock(nn.Module):
         scores = Q @ K.transpose(-2, -1)
         scores = scores / math.sqrt(self.d_model)
 
+        # Causal mask
+        seq_len = x.size(0)
+
+        causal_mask = torch.tril(
+            torch.ones(
+                seq_len,
+                seq_len,
+                dtype=torch.bool,
+                device=x.device
+            )
+        )
+
+        scores = scores.masked_fill(
+            ~causal_mask,
+            -float('inf')
+        )
+
+        # Padding mask
         if attention_mask is not None:
             scores = scores.masked_fill(
                 ~attention_mask,
@@ -124,7 +144,7 @@ texts = [
 
 dataset = []
 
-for text in texts[:4]:
+for text in texts:
     ids, target, attention_mask = tokenizer.prepare(text, max_len=5)
     dataset.append((ids, target, attention_mask))
 
@@ -141,61 +161,82 @@ optimizer = torch.optim.AdamW(
     lr=0.001
 )
 
-for step in range(1000):
-    total_loss = 0
+if os.path.exists("tiny_transformer.pt"):
+    checkpoint = torch.load("tiny_transformer.pt")
 
-    for ids, target, attention_mask in dataset:
-        # =========================
-        # 0. Обнуляем старые градиенты
-        # =========================
-        optimizer.zero_grad()
+    result = block.load_state_dict(checkpoint["block"])
+    print(result)
 
-        # =========================
-        # 1. Token IDs → Embeddings
-        # =========================
-        x = embedding(ids)
+    result = embedding.load_state_dict(checkpoint["embedding"])
+    print(result)
 
-        # =========================
-        # 2. Transformer Forward
-        # =========================
-        logits = block(
-            x,
-            attention_mask=attention_mask
-        )
+    print("Веса успешно загружены.")
 
-        # =========================
-        # 3. Loss
-        # =========================
-        loss = criterion(logits, target)
+else:
+    IS_TRAIN = True
+    print("Весов нет. Запускаем обучение.")
 
-        # =========================
-        # 4. Backpropagation
-        # =========================
-        loss.backward()
+if IS_TRAIN:
+    for step in range(500):
+        total_loss = 0
 
-        # =========================
-        # 5. Update weights
-        # =========================
-        optimizer.step()
+        for ids, target, attention_mask in dataset:
+            # =========================
+            # 0. Обнуляем старые градиенты
+            # =========================
+            optimizer.zero_grad()
 
-        # =========================
-        # 6. Print loss
-        # =========================
-        total_loss += loss.item()
+            # =========================
+            # 1. Token IDs → Embeddings
+            # =========================
+            x = embedding(ids)
 
-    if step % 100 == 0:
-        print(
-            f"step={step}, "
-            f"loss={total_loss / len(dataset):.4f}"
-        )
+            # =========================
+            # 2. Transformer Forward
+            # =========================
+            logits = block(
+                x,
+                attention_mask=attention_mask
+            )
 
-ids, _, attention_mask = dataset[3]
+            # =========================
+            # 3. Loss
+            # =========================
+            loss = criterion(logits, target)
+
+            # =========================
+            # 4. Backpropagation
+            # =========================
+            loss.backward()
+
+            # =========================
+            # 5. Update weights
+            # =========================
+            optimizer.step()
+
+            # =========================
+            # 6. Print loss
+            # =========================
+            total_loss += loss.item()
+
+        if step % 10 == 0:
+            print(
+                f"step={step}, "
+                f"loss={total_loss / len(dataset):.4f}"
+            )
+
+    torch.save({
+        "embedding": embedding.state_dict(),
+        "block": block.state_dict(),
+    }, "tiny_transformer.pt")
+
+ids, _, attention_mask = dataset[15]
 ids = ids[:-2]
 print(tokenizer.decode(ids))
 attention_mask = attention_mask[:-2]
 
 with torch.no_grad():
-    for i in range(3):
+    for i in range(1):
         x = embedding(ids)
         logits = block(
             x,
