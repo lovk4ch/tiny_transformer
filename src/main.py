@@ -1,88 +1,14 @@
-import math
 import os
 
 import torch
 import torch.nn as nn
 
 from src.tokenizer import Tokenizer
+from src.transformer_block import TransformerBlock
 
 IS_TRAIN = False
+TEMPERATURE = 1.3
 EMBEDDING_SIZE = 4
-
-class TransformerBlock(nn.Module):
-    def __init__(self, d_model=4, ff_dim=8, vocab_size=5):
-        super().__init__()
-
-        self.WQ = nn.Linear(d_model, d_model, bias=False)
-        self.WK = nn.Linear(d_model, d_model, bias=False)
-        self.WV = nn.Linear(d_model, d_model, bias=False)
-
-        self.norm1 = nn.LayerNorm(d_model)
-        self.norm2 = nn.LayerNorm(d_model)
-
-        self.ff = nn.Sequential(
-            nn.Linear(d_model, ff_dim),
-            nn.ReLU(),
-            nn.Linear(ff_dim, d_model)
-        )
-
-        self.d_model = d_model
-        self.lm_head =  nn.Linear(d_model, vocab_size)
-
-    def forward(self, x, attention_mask=None):
-        Q = self.WQ(x)
-        K = self.WK(x)
-        V = self.WV(x)
-
-        scores = Q @ K.transpose(-2, -1)
-        scores = scores / math.sqrt(self.d_model)
-
-        # Causal mask
-        seq_len = x.size(0)
-
-        causal_mask = torch.tril(
-            torch.ones(
-                seq_len,
-                seq_len,
-                dtype=torch.bool,
-                device=x.device
-            )
-        )
-
-        scores = scores.masked_fill(
-            ~causal_mask,
-            -float('inf')
-        )
-
-        # Padding mask
-        if attention_mask is not None:
-            scores = scores.masked_fill(
-                ~attention_mask,
-                float("-inf")
-            )
-
-        weights = torch.softmax(scores, dim=-1)
-
-        attention = weights @ V
-
-        x = x + attention
-
-        x = self.norm1(x)
-
-        ff_output = self.ff(x)
-
-        x = x + ff_output
-
-        x = self.norm2(x)
-
-        logits = self.lm_head(x)
-
-        # print("\n--- Logits: ---")
-        # print(logits)
-        # print("shape:", logits.shape)
-
-        return logits
-
 
 tokens = [
     "the", "cat", "dog", "bird", "fish",
@@ -161,14 +87,11 @@ optimizer = torch.optim.AdamW(
     lr=0.001
 )
 
-if os.path.exists("tiny_transformer.pt"):
-    checkpoint = torch.load("tiny_transformer.pt")
+if os.path.exists("models/tiny_transformer.pt"):
+    checkpoint = torch.load("models/tiny_transformer.pt")
 
-    result = block.load_state_dict(checkpoint["block"])
-    print(result)
-
-    result = embedding.load_state_dict(checkpoint["embedding"])
-    print(result)
+    block.load_state_dict(checkpoint["block"])
+    embedding.load_state_dict(checkpoint["embedding"])
 
     print("Веса успешно загружены.")
 
@@ -228,22 +151,34 @@ if IS_TRAIN:
     torch.save({
         "embedding": embedding.state_dict(),
         "block": block.state_dict(),
-    }, "tiny_transformer.pt")
+    }, "models/tiny_transformer.pt")
 
-ids, _, attention_mask = dataset[15]
-ids = ids[:-2]
-print(tokenizer.decode(ids))
-attention_mask = attention_mask[:-2]
+sequence, _, _ = dataset[11]
+sequence = sequence[:-2]
 
 with torch.no_grad():
-    for i in range(1):
-        x = embedding(ids)
+    for i in range(15):
+        print(tokenizer.decode(sequence))
+
+        x = embedding(sequence)
         logits = block(
             x,
-            attention_mask=attention_mask
+            attention_mask=torch.ones(
+                sequence.shape[0],
+                dtype=torch.bool
+            )
+        )[-1]
+
+        next_token_probs = torch.softmax(
+            logits / TEMPERATURE,
+            dim=-1
         )
 
-        next_token_logits = logits[-1]
-        next_token_probs = torch.softmax(next_token_logits, dim=-1)
-        next_token_id = next_token_logits.argmax(dim=-1)
-        print(tokens[next_token_id])
+        next_token_id = torch.multinomial(
+            next_token_probs,
+            num_samples=1
+        )
+        sequence = torch.cat(
+            (sequence, next_token_id),
+            dim=0
+        )
