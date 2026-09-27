@@ -1,11 +1,11 @@
 import math
 
 import torch
-from torch import nn as nn
+from torch import nn
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, d_model=4, ff_dim=8, vocab_size=5):
+    def __init__(self, d_model=4, ff_dim=8):
         super().__init__()
 
         self.WQ = nn.Linear(d_model, d_model, bias=False)
@@ -22,7 +22,6 @@ class TransformerBlock(nn.Module):
         )
 
         self.d_model = d_model
-        self.lm_head =  nn.Linear(d_model, vocab_size)
 
     def forward(self, x, attention_mask=None):
         Q = self.WQ(x)
@@ -70,6 +69,32 @@ class TransformerBlock(nn.Module):
 
         x = self.norm2(x)
 
-        logits = self.lm_head(x)
+        return x
 
+class Transformer(nn.Module):
+    def __init__(self, vocab_size, d_model=16, ff_dim=16):
+        super().__init__()
+
+        self.embedding = nn.Embedding(
+            num_embeddings=vocab_size,
+            embedding_dim=d_model
+        )
+
+        self.block = TransformerBlock(
+            d_model=d_model,
+            ff_dim=ff_dim
+        )
+
+        self.lm_head = nn.Linear(
+            d_model,
+            vocab_size
+        )
+
+    def forward(self, ids, attention_mask=None):
+        x = self.embedding(ids)
+        x = self.block(
+            x,
+            attention_mask
+        )
+        logits = self.lm_head(x)
         return logits

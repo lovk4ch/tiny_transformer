@@ -16,10 +16,7 @@ class Tokenizer:
         self.pad_id = self.vocab["<pad>"]
 
     def create_target(self, ids):
-        return torch.cat([
-            ids[1:],
-            torch.tensor([self.eos_id])
-        ])
+        return ids[1:]
 
     def create_attention_mask(self, ids):
         return ids != self.pad_id
@@ -32,6 +29,7 @@ class Tokenizer:
             for token in tokens
         ]
 
+        ids.append(self.eos_id)
         return ids
 
     def decode(self, ids):
@@ -57,9 +55,9 @@ class Tokenizer:
 
     def prepare(self, text, max_len):
         ids = torch.tensor(self.encode(text))
-        ids = self.pad(ids, max_len)
-
         target = self.create_target(ids)
+
+        ids = self.pad(ids, max_len)
         target = self.pad(target, max_len)
 
         attention_mask = self.create_attention_mask(ids)
