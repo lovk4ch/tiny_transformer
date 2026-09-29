@@ -1,4 +1,5 @@
 import os
+import random
 
 import torch
 from torch import nn
@@ -70,7 +71,7 @@ class Trainer:
         # random.shuffle(dataset)
 
         # split = int(len(dataset) * 0.8)
-        split = 4
+        split = 5
 
         self.train_dataset = dataset[:split]
         self.val_dataset = dataset
@@ -126,10 +127,10 @@ class Trainer:
                 tqdm.write(text)
                 self.evaluate()
 
-            text = f"epoch={epoch}, loss={avg_loss:.3f}\n" + text
+            # text = f"epoch={epoch}, loss={avg_loss:.3f}\n" + text
 
-            if self.on_update:
-                self.on_update(text)
+            # if self.on_update:
+                # self.on_update(text)
 
             if avg_loss < 0.0:
                 break
@@ -142,9 +143,12 @@ class Trainer:
     def evaluate(self):
         self.model.eval()
         total_loss = 0.0
+        text = ""
+        pbar = tqdm(self.val_dataset)
+        tqdm.write(f"============================== EVALUATE:")
 
         with torch.no_grad():
-            for ids, target, attention_mask in self.val_dataset:
+            for ids, target, attention_mask in pbar:
                 ids = ids.to(self.device)
                 target = target.to(self.device)
                 attention_mask = attention_mask.to(self.device)
@@ -153,14 +157,16 @@ class Trainer:
                     ids,
                     attention_mask=attention_mask
                 )
-
-                print(f"============================== EVALUATE:")
-                # self.token_probs(ids, logits)
+                text += self.token_probs(ids, logits)
 
                 loss = self.criterion(logits, target)
                 total_loss += loss.item()
 
-        print(f"loss={total_loss / len(self.val_dataset):.3f}")
+        text = f"loss={total_loss / len(self.val_dataset):.3f}\n" + text
+        # tqdm.write(text)
+
+        if self.on_update:
+            self.on_update(text)
 
         self.model.train()
 
@@ -171,18 +177,28 @@ class Trainer:
             if input[i].item() == self.tokenizer.eos_id:
                 break
 
-            sorted_logits, tokens = torch.sort(logits[i], descending=True)
-            probs = torch.softmax(sorted_logits, dim=0)
+            probs = torch.softmax(logits[i], dim=0)
 
-            probs = probs[:1]
-            tokens = tokens[:1]
+            sorted_probs, sorted_indices = torch.sort(
+                probs, descending=True
+            )
 
-            for token, prob in zip(tokens, probs):
-                text.append(
-                    f"--- pred. {i}: "
-                    f"{self.tokenizer.decode([token])}, "
-                    f"{prob * 100:.1f}%"
-                )
+            cumulative_probs = torch.cumsum(sorted_probs, dim=0)
+
+            mask = cumulative_probs - sorted_probs < 0.9
+            values = sorted_probs[mask]
+            indices = sorted_indices[mask]
+
+            random_idx = random.randrange(len(indices))
+
+            token = indices[random_idx]
+            prob = values[random_idx]
+
+            text.append(
+                f"--- pred. {i}: "
+                f"{self.tokenizer.decode([token])}, "
+                f"{prob * 100:.1f}%"
+            )
 
         return "\n".join(text) + "\n"
 

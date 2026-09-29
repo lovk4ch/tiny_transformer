@@ -5,8 +5,8 @@ from PIL import Image, ImageTk
 
 class MainWindow:
     def __init__(self):
-        self.width = 1024
-        self.height = 576
+        self.width = 1280
+        self.height = 720
 
         self.root = tk.Tk()
         self.root.resizable(False, False)
@@ -35,7 +35,7 @@ class MainWindow:
             anchor="nw",
             text="",
             fill="white",
-            font=("Consolas", 24)
+            font=("Consolas", 20)
         )
 
     def update(self, text):

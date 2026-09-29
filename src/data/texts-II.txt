@@ -1,3 +1,5 @@
 cats chase dogs
 dogs watch cats
 cats see dogs
+cats care cats
+cats care dogs
