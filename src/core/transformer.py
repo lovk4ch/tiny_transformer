@@ -72,13 +72,26 @@ class TransformerBlock(nn.Module):
         return x
 
 class Transformer(nn.Module):
-    def __init__(self, vocab_size, d_model=16, ff_dim=16):
+    def __init__(self, vocab_size, d_model=16, ff_dim=16, max_len=16):
         super().__init__()
 
         self.embedding = nn.Embedding(
             num_embeddings=vocab_size,
             embedding_dim=d_model
         )
+
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(max_len).unsqueeze(1)
+
+        div_term = torch.exp(
+            torch.arange(0, d_model, 2)
+            * (-math.log(10000.0) / d_model)
+        )
+
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+
+        self.register_buffer("pos_encoding", pe)
 
         self.block = TransformerBlock(
             d_model=d_model,
@@ -90,8 +103,11 @@ class Transformer(nn.Module):
             vocab_size
         )
 
-    def forward(self, ids, attention_mask=None):
+    def forward(self, ids, attention_mask=None, pe=False):
         x = self.embedding(ids)
+        # if pe:
+        #     x = x + self.pos_encoding[:x.size(0)]
+
         x = self.block(
             x,
             attention_mask

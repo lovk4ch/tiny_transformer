@@ -1,0 +1,3 @@
+cats chase dogs
+dogs watch cats
+cats see dogs
