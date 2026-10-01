@@ -1,5 +1,4 @@
 import os
-import random
 
 import torch
 from torch import nn
@@ -7,12 +6,13 @@ from tqdm import tqdm
 
 from src.core.tokenizer import Tokenizer
 from src.core.transformer import Transformer
+from src.logger import Logger
 
 
 class Trainer:
     def __init__(
             self, embedding_size=32, ff_dim_size=32, max_word_count=16, is_train=True,
-            temperature=1, learning_rate=1e-3, on_update=None):
+            temperature=1, learning_rate=1e-3, train_dataset_len=0, on_update=None):
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print("Available devices:", self.device)
@@ -70,12 +70,14 @@ class Trainer:
         # random.seed(42)
         # random.shuffle(dataset)
 
-        # split = int(len(dataset) * 0.8)
-        split = 5
+        split = train_dataset_len
+        if split == 0:
+            split = int(len(dataset) * 0.8)
 
         self.train_dataset = dataset[:split]
-        self.val_dataset = dataset
+        self.val_dataset = dataset[split:]
 
+        self.logger = Logger(self.tokenizer)
         checkpoint_path = "models/tiny_transformer.pt"
 
         if os.path.exists(checkpoint_path):
@@ -105,20 +107,21 @@ class Trainer:
                 attention_mask = attention_mask.to(self.device)
 
                 self.optimizer.zero_grad()
-                logits = self.model(
+                logits, log_data = self.model(
                     ids,
-                    attention_mask=attention_mask
+                    attention_mask=attention_mask,
+                    log=True,
                 )
 
-                text += self.token_probs(ids, logits)
+                log_fp = self.logger.trace_forward_pass(ids, log_data)
+                log_pred = self.logger.trace_predictions(ids, logits)
+                text += log_pred + "\n\n"
 
                 loss = self.criterion(logits, target)
                 loss.backward()
                 self.optimizer.step()
                 total_loss += loss.item()
                 pbar.set_postfix(loss=f"{loss.item():.3f}")
-
-                # time.sleep(1)
 
             avg_loss = total_loss / len(self.train_dataset)
             epoch += 1
@@ -127,12 +130,12 @@ class Trainer:
                 tqdm.write(text)
                 self.evaluate()
 
-            # text = f"epoch={epoch}, loss={avg_loss:.3f}\n" + text
+            text = f"epoch={epoch}, loss={avg_loss:.3f}\n\n" + text
 
-            # if self.on_update:
-                # self.on_update(text)
+            if self.on_update:
+                self.on_update(text)
 
-            if avg_loss < 0.0:
+            if epoch > 300:
                 break
 
         torch.save({
@@ -153,54 +156,28 @@ class Trainer:
                 target = target.to(self.device)
                 attention_mask = attention_mask.to(self.device)
 
-                logits = self.model(
+                logits, log_data = self.model(
                     ids,
-                    attention_mask=attention_mask
+                    attention_mask=attention_mask,
+                    log=True
                 )
-                text += self.token_probs(ids, logits)
+
+                log_fp = self.logger.trace_forward_pass(ids, log_data)
+                log_pred = self.logger.trace_predictions(ids, logits)
+                text += log_pred + "\n\n"
 
                 loss = self.criterion(logits, target)
                 total_loss += loss.item()
 
         text = f"loss={total_loss / len(self.val_dataset):.3f}\n" + text
-        # tqdm.write(text)
+        tqdm.write(text)
 
         if self.on_update:
             self.on_update(text)
 
         self.model.train()
 
-    def token_probs(self, input: torch.Tensor, logits: torch.Tensor) -> str:
-        text = [self.tokenizer.decode(input)]
 
-        for i in range(len(logits)):
-            if input[i].item() == self.tokenizer.eos_id:
-                break
-
-            probs = torch.softmax(logits[i], dim=0)
-
-            sorted_probs, sorted_indices = torch.sort(
-                probs, descending=True
-            )
-
-            cumulative_probs = torch.cumsum(sorted_probs, dim=0)
-
-            mask = cumulative_probs - sorted_probs < 0.9
-            values = sorted_probs[mask]
-            indices = sorted_indices[mask]
-
-            random_idx = random.randrange(len(indices))
-
-            token = indices[random_idx]
-            prob = values[random_idx]
-
-            text.append(
-                f"--- pred. {i}: "
-                f"{self.tokenizer.decode([token])}, "
-                f"{prob * 100:.1f}%"
-            )
-
-        return "\n".join(text) + "\n"
 
     def run(self):
         if self.is_train:

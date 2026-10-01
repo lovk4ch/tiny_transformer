@@ -23,13 +23,13 @@ class TransformerBlock(nn.Module):
 
         self.d_model = d_model
 
-    def forward(self, x, attention_mask=None):
+    def forward(self, x, attention_mask=None, log=False):
         Q = self.WQ(x)
         K = self.WK(x)
         V = self.WV(x)
 
-        scores = Q @ K.transpose(-2, -1)
-        scores = scores / math.sqrt(self.d_model)
+        w_qk = Q @ K.transpose(-2, -1)
+        scores = w_qk / math.sqrt(self.d_model)
 
         # Causal mask
         seq_len = x.size(0)
@@ -43,19 +43,19 @@ class TransformerBlock(nn.Module):
             )
         )
 
-        scores = scores.masked_fill(
+        masked_scores = scores.masked_fill(
             ~causal_mask,
             -float('inf')
         )
 
         # Padding mask
         if attention_mask is not None:
-            scores = scores.masked_fill(
+            masked_scores = masked_scores.masked_fill(
                 ~attention_mask,
                 float("-inf")
             )
 
-        weights = torch.softmax(scores, dim=-1)
+        weights = torch.softmax(masked_scores, dim=-1)
 
         attention = weights @ V
 
@@ -69,7 +69,16 @@ class TransformerBlock(nn.Module):
 
         x = self.norm2(x)
 
-        return x
+        if log:
+            return x, {
+                "W_QK": w_qk,
+                "scores": scores,
+                "masked_scores": masked_scores,
+                "weights": weights,
+                "attention": attention,
+            }
+        else:
+            return x, None
 
 class Transformer(nn.Module):
     def __init__(self, vocab_size, d_model=16, ff_dim=16, max_len=16):
@@ -103,14 +112,15 @@ class Transformer(nn.Module):
             vocab_size
         )
 
-    def forward(self, ids, attention_mask=None, pe=False):
+    def forward(self, ids, attention_mask=None, pe=False, log=False):
         x = self.embedding(ids)
-        # if pe:
-        #     x = x + self.pos_encoding[:x.size(0)]
+        if pe:
+            x = x + self.pos_encoding[:x.size(0)]
 
-        x = self.block(
+        x, log_data = self.block(
             x,
-            attention_mask
+            attention_mask,
+            log=log
         )
         logits = self.lm_head(x)
-        return logits
+        return logits, log_data

@@ -32,7 +32,7 @@ class Tokenizer:
         ids.append(self.eos_id)
         return ids
 
-    def decode(self, ids):
+    def decode(self, ids) -> str:
         tokens = [
             self.id_to_token[id.item()]
             for id in ids

@@ -10,7 +10,10 @@ class MainWindow:
 
         self.root = tk.Tk()
         self.root.resizable(False, False)
-        self.root.geometry(f"{self.width}x{self.height}")
+        x = (self.root.winfo_screenwidth() - self.width) // 2
+        y = (self.root.winfo_screenheight() - self.height) // 2
+
+        self.root.geometry(f"{self.width}x{self.height}+{x}+{y}")
 
         self.canvas = tk.Canvas(
             self.root,
@@ -35,7 +38,7 @@ class MainWindow:
             anchor="nw",
             text="",
             fill="white",
-            font=("Consolas", 20)
+            font=("Consolas", 13)
         )
 
     def update(self, text):
