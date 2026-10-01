@@ -21,7 +21,7 @@ class Tokenizer:
     def create_attention_mask(self, ids):
         return ids != self.pad_id
 
-    def encode(self, text):
+    def encode(self, text, eos=True):
         tokens = text.split()
 
         ids = [
@@ -29,7 +29,9 @@ class Tokenizer:
             for token in tokens
         ]
 
-        ids.append(self.eos_id)
+        if eos:
+            ids.append(self.eos_id)
+
         return ids
 
     def decode(self, ids) -> str:
@@ -53,8 +55,8 @@ class Tokenizer:
             )
         ])
 
-    def prepare(self, text, max_len):
-        ids = torch.tensor(self.encode(text))
+    def prepare(self, text, max_len, eos=True):
+        ids = torch.tensor(self.encode(text, eos=eos))
         target = self.create_target(ids)
 
         ids = self.pad(ids, max_len)

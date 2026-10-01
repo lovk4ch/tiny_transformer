@@ -13,7 +13,7 @@ def main():
         is_train=False,
         temperature=1,
         learning_rate=5e-3,
-        train_dataset_len=4,
+        train_dataset_len=0,
         on_update=lambda text:
             ui.root.after(0, ui.update, text)
     )

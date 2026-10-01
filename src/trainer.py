@@ -1,4 +1,5 @@
 import os
+import random
 
 import torch
 from torch import nn
@@ -32,7 +33,7 @@ class Trainer:
             "<eos>": 1,
         }
 
-        with open("data/texts-II.txt", "r", encoding="utf-8") as f:
+        with open("data/texts.txt", "r", encoding="utf-8") as f:
             texts = [line.strip() for line in f if line.strip()]
 
         for text in texts:
@@ -67,15 +68,15 @@ class Trainer:
             )
             dataset.append((ids, target, attention_mask))
 
-        # random.seed(42)
-        # random.shuffle(dataset)
+        random.seed(42)
+        random.shuffle(dataset)
 
         split = train_dataset_len
         if split == 0:
             split = int(len(dataset) * 0.8)
 
         self.train_dataset = dataset[:split]
-        self.val_dataset = dataset[split:]
+        self.val_dataset = dataset[:split]
 
         self.logger = Logger(self.tokenizer)
         checkpoint_path = "models/tiny_transformer.pt"
@@ -126,16 +127,16 @@ class Trainer:
             avg_loss = total_loss / len(self.train_dataset)
             epoch += 1
 
-            if epoch % 10 == 9:
+            text = f"epoch={epoch}, loss={avg_loss:.3f}\n\n" + text
+
+            if epoch % 1 == 0:
                 tqdm.write(text)
                 self.evaluate()
 
-            text = f"epoch={epoch}, loss={avg_loss:.3f}\n\n" + text
+            # if self.on_update:
+            #     self.on_update(text)
 
-            if self.on_update:
-                self.on_update(text)
-
-            if epoch > 300:
+            if epoch > 30:
                 break
 
         torch.save({
@@ -177,10 +178,37 @@ class Trainer:
 
         self.model.train()
 
+    def generate(self, text):
+        self.model.eval()
+
+        tqdm.write("============================== GENERATE:")
+
+        for i in range(10):
+            ids, _, _ = self.tokenizer.prepare(
+                text,
+                max_len=15,
+                eos=False
+            )
+            ids = ids.to(self.device)
+
+            with torch.no_grad():
+                logits, log_data = self.model(
+                    ids,
+                    log=True
+                )
+
+            next_token = torch.argmax(logits[i])
+            next_word = self.tokenizer.decode([next_token])
+
+            text += " " + next_word
+            print(text)
+
+            if next_token.item() == self.tokenizer.eos_id:
+                break
 
 
     def run(self):
         if self.is_train:
             self.train()
         else:
-            self.evaluate()
+            self.generate("the")

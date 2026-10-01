@@ -32,7 +32,6 @@ class Logger:
 
             # token = indices[random_idx]
             # prob = values[random_idx]
-            # token = torch.argmax(logits[i - 1])
 
             """
             text.append(
