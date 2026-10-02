@@ -5,28 +5,36 @@ import torch
 from torch import nn
 from tqdm import tqdm
 
+from src import logger
 from src.core.tokenizer import Tokenizer
 from src.core.transformer import Transformer
-from src.logger import Logger
+from src.core.types.mode import Mode
+from src.core.types.sampling import SamplingMethod
 
 
 class Trainer:
     def __init__(
-            self, embedding_size=32, ff_dim_size=32, max_word_count=16, is_train=True,
-            temperature=1, learning_rate=1e-3, train_dataset_len=0, on_update=None):
+            self, mode=Mode.TRAIN, embedding_size=32, ff_dim_size=32, max_tokens=16,
+            temperature=1, epochs=45, learning_rate=1e-3, train_dataset_len=0,
+            sampling=SamplingMethod.GREEDY, on_update=None):
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print("Available devices:", self.device)
 
-        self.on_update = on_update
-
+        self.mode = mode
         self.embedding_size = embedding_size
         self.ff_dim_size = ff_dim_size
-        self.max_word_count = max_word_count
+        self.max_tokens = max_tokens
 
-        self.is_train = is_train
         self.temperature = temperature
+        self.epochs = epochs
         self.learning_rate = learning_rate
+
+        self.top_k = 3
+        self.top_p = 0.9
+        self.sampling = sampling
+
+        self.on_update = on_update
 
         self.vocab = {
             "<pad>": 0,
@@ -49,7 +57,7 @@ class Trainer:
             vocab_size=len(self.tokenizer.vocab),
             d_model=self.embedding_size,
             ff_dim=self.ff_dim_size,
-            max_len=self.max_word_count,
+            max_len=self.max_tokens,
         ).to(self.device)
 
         self.criterion = nn.CrossEntropyLoss(
@@ -64,11 +72,11 @@ class Trainer:
         for text in texts:
             ids, target, attention_mask = self.tokenizer.prepare(
                 text,
-                max_len=self.max_word_count
+                max_len=self.max_tokens
             )
             dataset.append((ids, target, attention_mask))
 
-        random.seed(42)
+        # random.seed(42)
         random.shuffle(dataset)
 
         split = train_dataset_len
@@ -78,7 +86,6 @@ class Trainer:
         self.train_dataset = dataset[:split]
         self.val_dataset = dataset[:split]
 
-        self.logger = Logger(self.tokenizer)
         checkpoint_path = "models/tiny_transformer.pt"
 
         if os.path.exists(checkpoint_path):
@@ -89,11 +96,11 @@ class Trainer:
                 print("Weights loaded successfully")
 
             else:
-                self.is_train = True
+                self.mode = Mode.TRAIN
                 print("Vocabulary changed — training from scratch")
 
         else:
-            self.is_train = True
+            self.mode = Mode.TRAIN
             print("Weights not found — start training from scratch")
 
     def train(self):
@@ -114,8 +121,21 @@ class Trainer:
                     log=True,
                 )
 
-                log_fp = self.logger.trace_forward_pass(ids, log_data)
-                log_pred = self.logger.trace_predictions(ids, logits)
+                candidates = []
+                for i in range(len(logits)):
+                    values, indices = self.get_top_tokens(logits[i])
+                    candidates.append((values, indices))
+
+                log_pred = logger.trace_predictions(
+                    ids=ids,
+                    candidates=candidates,
+                    tokenizer=self.tokenizer
+                )
+                log_fp = logger.trace_forward_pass(
+                    ids=ids,
+                    log_data=log_data,
+                    tokenizer=self.tokenizer
+                )
                 text += log_pred + "\n\n"
 
                 loss = self.criterion(logits, target)
@@ -133,10 +153,7 @@ class Trainer:
                 tqdm.write(text)
                 self.evaluate()
 
-            # if self.on_update:
-            #     self.on_update(text)
-
-            if epoch > 30:
+            if epoch > self.epochs:
                 break
 
         torch.save({
@@ -163,8 +180,21 @@ class Trainer:
                     log=True
                 )
 
-                log_fp = self.logger.trace_forward_pass(ids, log_data)
-                log_pred = self.logger.trace_predictions(ids, logits)
+                candidates = []
+                for i in range(len(logits)):
+                    values, indices = self.get_top_tokens(logits[i - 1])
+                    candidates.append((values, indices))
+
+                log_pred = logger.trace_predictions(
+                    ids=ids,
+                    candidates=candidates,
+                    tokenizer=self.tokenizer
+                )
+                log_fp = logger.trace_forward_pass(
+                    ids=ids,
+                    log_data=log_data,
+                    tokenizer=self.tokenizer
+                )
                 text += log_pred + "\n\n"
 
                 loss = self.criterion(logits, target)
@@ -183,10 +213,16 @@ class Trainer:
 
         tqdm.write("============================== GENERATE:")
 
-        for i in range(10):
+        remaining = self.max_tokens - len(text.split())
+        if remaining < 0:
+            print(text)
+            print(f"--- too long sequence, max = {self.max_tokens}")
+            return
+
+        for i in range(remaining + 1):
             ids, _, _ = self.tokenizer.prepare(
                 text,
-                max_len=15,
+                max_len=self.max_tokens,
                 eos=False
             )
             ids = ids.to(self.device)
@@ -197,18 +233,51 @@ class Trainer:
                     log=True
                 )
 
-            next_token = torch.argmax(logits[i])
-            next_word = self.tokenizer.decode([next_token])
+            _, indices = self.get_top_tokens(logits[i])
 
+            if self.sampling == SamplingMethod.GREEDY:
+                next_token = indices[0]
+            else:
+                next_token = indices[random.randrange(len(indices))]
+
+            next_word = self.tokenizer.decode([next_token])
             text += " " + next_word
             print(text)
 
             if next_token.item() == self.tokenizer.eos_id:
                 break
 
+            if i == remaining:
+                text += " <limit>"
+                print(text)
+                break
+
+    def get_top_tokens(self, logits):
+        probs = torch.softmax(logits, dim=0)
+
+        match self.sampling:
+            case SamplingMethod.GREEDY:
+                indices = torch.argmax(logits).unsqueeze(0)
+                values = probs[indices]
+
+            case SamplingMethod.TOP_K:
+                values, indices = torch.topk(probs, k=self.top_k)
+
+            case SamplingMethod.TOP_P:
+                sorted_probs, sorted_indices = torch.sort(probs, descending=True)
+                cumulative_probs = torch.cumsum(sorted_probs, dim=0)
+                mask = cumulative_probs - sorted_probs < self.top_p
+
+                values = sorted_probs[mask]
+                indices = sorted_indices[mask]
+
+        return values, indices
 
     def run(self):
-        if self.is_train:
-            self.train()
-        else:
-            self.generate("the")
+        match self.mode:
+            case Mode.GENERATE:
+                self.generate("dogs")
+            case Mode.EVALUATE:
+                self.evaluate()
+            case Mode.TRAIN:
+                self.train()
