@@ -76,7 +76,7 @@ class Trainer:
             )
             dataset.append((ids, target, attention_mask))
 
-        # random.seed(42)
+        random.seed(42)
         random.shuffle(dataset)
 
         split = train_dataset_len
@@ -84,7 +84,7 @@ class Trainer:
             split = int(len(dataset) * 0.8)
 
         self.train_dataset = dataset[:split]
-        self.val_dataset = dataset[:split]
+        self.val_dataset = dataset[split:]
 
         checkpoint_path = "models/tiny_transformer.pt"
 
@@ -123,7 +123,7 @@ class Trainer:
 
                 candidates = []
                 for i in range(len(logits)):
-                    values, indices = self.get_top_tokens(logits[i])
+                    values, indices = self.get_top_tokens(logits[i - 1])
                     candidates.append((values, indices))
 
                 log_pred = logger.trace_predictions(
@@ -211,7 +211,7 @@ class Trainer:
     def generate(self, text):
         self.model.eval()
 
-        tqdm.write("============================== GENERATE:")
+        # tqdm.write("============================== GENERATE:")
 
         remaining = self.max_tokens - len(text.split())
         if remaining < 0:
@@ -233,18 +233,18 @@ class Trainer:
                     log=True
                 )
 
-            _, indices = self.get_top_tokens(logits[i])
+            values, indices = self.get_top_tokens(logits[i])
 
             if self.sampling == SamplingMethod.GREEDY:
                 next_token = indices[0]
             else:
-                next_token = indices[random.randrange(len(indices))]
+                next_token = indices[torch.multinomial(values, 1)]
 
             next_word = self.tokenizer.decode([next_token])
             text += " " + next_word
-            print(text)
 
             if next_token.item() == self.tokenizer.eos_id:
+                print(text)
                 break
 
             if i == remaining:
@@ -276,7 +276,8 @@ class Trainer:
     def run(self):
         match self.mode:
             case Mode.GENERATE:
-                self.generate("dogs")
+                for i in range(10):
+                    self.generate("dogs")
             case Mode.EVALUATE:
                 self.evaluate()
             case Mode.TRAIN:
