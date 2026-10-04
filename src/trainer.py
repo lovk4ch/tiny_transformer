@@ -30,26 +30,22 @@ class Trainer:
         self.epochs = epochs
         self.learning_rate = learning_rate
 
-        self.top_k = 3
+        self.top_k = 6
         self.top_p = 0.9
         self.sampling = sampling
 
         self.on_update = on_update
 
-        self.vocab = {
-            "<pad>": 0,
-            "<eos>": 1,
-        }
-
         with open("data/texts.txt", "r", encoding="utf-8") as f:
             texts = [line.strip() for line in f if line.strip()]
 
-        for text in texts:
-            for word in text.split():
-                if word not in self.vocab:
-                    self.vocab[word] = len(self.vocab)
+        split = train_dataset_len
+        if split == 0:
+            split = int(len(texts) * 0.8)
 
-        self.tokenizer = Tokenizer(self.vocab)
+        self.tokenizer = Tokenizer()
+        self.tokenizer.train(texts[:split])
+
         print(f"Vocab: {self.tokenizer.vocab}")
         print(f"Vocab volume: {len(self.tokenizer.vocab)} tokens")
 
@@ -78,10 +74,6 @@ class Trainer:
 
         random.seed(42)
         random.shuffle(dataset)
-
-        split = train_dataset_len
-        if split == 0:
-            split = int(len(dataset) * 0.8)
 
         self.train_dataset = dataset[:split]
         self.val_dataset = dataset[split:]
@@ -136,7 +128,7 @@ class Trainer:
                     log_data=log_data,
                     tokenizer=self.tokenizer
                 )
-                text += log_pred + "\n\n"
+                # text += log_pred + "\n\n"
 
                 loss = self.criterion(logits, target)
                 loss.backward()
@@ -195,7 +187,7 @@ class Trainer:
                     log_data=log_data,
                     tokenizer=self.tokenizer
                 )
-                text += log_pred + "\n\n"
+                # text += log_pred + "\n\n"
 
                 loss = self.criterion(logits, target)
                 total_loss += loss.item()
@@ -253,7 +245,7 @@ class Trainer:
                 break
 
     def get_top_tokens(self, logits):
-        probs = torch.softmax(logits, dim=0)
+        probs = torch.softmax(logits / self.temperature, dim=0)
 
         match self.sampling:
             case SamplingMethod.GREEDY:
