@@ -102,10 +102,9 @@ class Transformer(nn.Module):
 
         self.register_buffer("pos_encoding", pe)
 
-        self.block = TransformerBlock(
-            d_model=d_model,
-            ff_dim=ff_dim
-        )
+        self.blocks = nn.ModuleList([
+            TransformerBlock(d_model=d_model, ff_dim=ff_dim),
+        ])
 
         self.lm_head = nn.Linear(
             d_model,
@@ -117,10 +116,14 @@ class Transformer(nn.Module):
         if pe:
             x = x + self.pos_encoding[:x.size(0)]
 
-        x, log_data = self.block(
-            x,
-            attention_mask,
-            log=log
-        )
+        log_data = {}
+
+        for block in self.blocks:
+            x, log_data = block(
+                x,
+                attention_mask,
+                log=log
+            )
+
         logits = self.lm_head(x)
         return logits, log_data
