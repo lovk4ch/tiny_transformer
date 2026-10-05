@@ -30,7 +30,7 @@ class Trainer:
         self.epochs = epochs
         self.learning_rate = learning_rate
 
-        self.top_k = 6
+        self.top_k = 3
         self.top_p = 0.9
         self.sampling = sampling
 
@@ -187,7 +187,7 @@ class Trainer:
                     log_data=log_data,
                     tokenizer=self.tokenizer
                 )
-                # text += log_pred + "\n\n"
+                text += log_pred + "\n\n"
 
                 loss = self.criterion(logits, target)
                 total_loss += loss.item()
@@ -226,14 +226,14 @@ class Trainer:
                 )
 
             values, indices = self.get_top_tokens(logits[i])
+            print([self.tokenizer.id_to_token[i.item()] for i in indices])
 
             if self.sampling == SamplingMethod.GREEDY:
                 next_token = indices[0]
             else:
                 next_token = indices[torch.multinomial(values, 1)]
 
-            next_word = self.tokenizer.decode([next_token])
-            text += " " + next_word
+            text += self.tokenizer.decode([next_token])
 
             if next_token.item() == self.tokenizer.eos_id:
                 print(text)
@@ -269,7 +269,7 @@ class Trainer:
         match self.mode:
             case Mode.GENERATE:
                 for i in range(10):
-                    self.generate("dogs")
+                    self.generate("dog")
             case Mode.EVALUATE:
                 self.evaluate()
             case Mode.TRAIN:

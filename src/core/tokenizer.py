@@ -9,7 +9,7 @@ class Tokenizer:
     allowed_chars = (
         "abcdefghijklmnopqrstuvwxyz"
         "0123456789"
-        "., !?'\"-:"
+        ".,!?'\"-:"
     )
 
     vocab_size = 1000
@@ -25,8 +25,6 @@ class Tokenizer:
         for char in self.allowed_chars:
             if char not in self.vocab:
                 self.vocab[char] = len(self.vocab)
-
-        self.vocab["dogss"] = len(self.vocab)
 
         self.vocab_size += len(self.vocab)
 
@@ -52,7 +50,7 @@ class Tokenizer:
         ])
 
     def clean_text(self, text):
-        allowed = set(self.allowed_chars)
+        allowed = set(self.allowed_chars + " ")
 
         text = text.lower()
         text = " ".join(text.split())
@@ -72,7 +70,7 @@ class Tokenizer:
             for i in range(len(tokens) - 1):
                 pair = (tokens[i], tokens[i + 1])
 
-                if " " in pair:
+                if pair[1].startswith("Ġ"):
                     continue
 
                 counts[pair] += 1
@@ -97,10 +95,17 @@ class Tokenizer:
         return merged
 
     def train_bpe(self, texts):
-        tokens = [
-            list(word)
-            for word in texts
-        ]
+        tokens = []
+
+        for text in texts:
+            text = self.clean_text(text)
+
+            # "dogs run fast"
+            # →
+            # "dogs Ġrun Ġfast"
+            text = text.replace(" ", "Ġ")
+
+            tokens.append(list(text))
 
         while len(self.vocab) < self.vocab_size:
             pair_counts = self.get_pair_counts(tokens)
@@ -108,13 +113,22 @@ class Tokenizer:
             if not pair_counts:
                 break
 
-            best_pair, count = pair_counts.most_common(1)[0]
+            best_pair = None
+            best_token = None
 
-            new_token = "".join(best_pair)
+            for pair, count in pair_counts.most_common():
+                new_token = "".join(pair)
 
-            if new_token not in self.vocab:
-                self.vocab[new_token] = len(self.vocab)
-                self.merges.append(best_pair)
+                if new_token not in self.vocab:
+                    best_token = new_token
+                    best_pair = pair
+                    break
+
+            if best_pair is None:
+                break
+
+            self.vocab[best_token] = len(self.vocab)
+            self.merges.append(best_pair)
 
             tokens = [
                 self.merge_pair(_tokens, best_pair)
@@ -139,23 +153,20 @@ class Tokenizer:
             if id.item() not in (self.pad_id, self.eos_id)
         ]
 
-        return "".join(tokens)
+        return "".join(tokens).replace("Ġ", " ")
 
     def encode(self, text, eos=True):
         text = self.clean_text(text)
-        tokens = []
-        words = text.split()
 
-        for i, word in enumerate(words):
-            word_tokens = list(word)
+        # "dogs run fast"
+        # →
+        # "dogs Ġrun Ġfast"
+        text = text.replace(" ", "Ġ")
 
-            for pair in self.merges:
-                word_tokens = self.merge_pair(word_tokens, pair)
+        tokens = list(text)
 
-            tokens.extend(word_tokens)
-
-            if i < len(words) - 1:
-                tokens.append(" ")
+        for pair in self.merges:
+            tokens = self.merge_pair(tokens, pair)
 
         ids = [self.vocab[token] for token in tokens]
 
