@@ -1,6 +1,6 @@
 import torch
 
-from src.core.tokenizer import Tokenizer
+from core.tokenizer import Tokenizer
 
 
 def trace_predictions(
@@ -14,10 +14,10 @@ def trace_predictions(
         if ids[i - 1].item() == tokenizer.eos_id:
             break
 
-        pred = " ".join(tokenizer.decode(ids).split()[:i])
+        pred = tokenizer.decode(ids[:i])
 
         tokens = " | ".join(
-            f"{tokenizer.decode([token])}: {prob.item():.1%}"
+            f"{tokenizer.decode([token], False)}: {prob.item():.1%}"
             for token, prob in zip(indices, values)
         )
 

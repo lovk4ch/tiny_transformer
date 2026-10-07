@@ -9,10 +9,11 @@ class Tokenizer:
     allowed_chars = (
         "abcdefghijklmnopqrstuvwxyz"
         "0123456789"
-        ".,!?'\"-:"
+        ".,!?'\"-:Ġ"
     )
+    punctuation = ".,!?'\"-:"
 
-    vocab_size = 1000
+    vocab_size = 5000
 
     def __init__(self):
         self.vocab = {
@@ -30,6 +31,20 @@ class Tokenizer:
 
         self.eos_id = self.vocab["<eos>"]
         self.pad_id = self.vocab["<pad>"]
+
+    def update(self,
+        vocab: dict=None,
+        merges: list=None
+    ):
+        if vocab:
+            self.vocab = vocab
+
+        if merges:
+            self.merges = merges
+
+        self.id_to_token = [
+            token for token, _id in self.vocab.items()
+        ]
 
     def create_target(self, ids):
         return ids[1:]
@@ -73,6 +88,9 @@ class Tokenizer:
                 if pair[1].startswith("Ġ"):
                     continue
 
+                if pair[1] in self.punctuation:
+                    continue
+
                 counts[pair] += 1
 
         return counts
@@ -109,7 +127,6 @@ class Tokenizer:
 
         while len(self.vocab) < self.vocab_size:
             pair_counts = self.get_pair_counts(tokens)
-
             if not pair_counts:
                 break
 
@@ -146,15 +163,6 @@ class Tokenizer:
 
         return ids, target, attention_mask
 
-    def decode(self, ids) -> str:
-        tokens = [
-            self.id_to_token[id.item()]
-            for id in ids
-            if id.item() not in (self.pad_id, self.eos_id)
-        ]
-
-        return "".join(tokens).replace("Ġ", " ")
-
     def encode(self, text, eos=True):
         text = self.clean_text(text)
 
@@ -175,9 +183,19 @@ class Tokenizer:
 
         return ids
 
+    def decode(self, ids, whitespaces: bool=True) -> str:
+        tokens = [
+            self.id_to_token[id.item()]
+            for id in ids
+            if id.item() not in (self.pad_id, self.eos_id)
+        ]
+
+        text = "".join(tokens)
+        return text.replace("Ġ", " ") if whitespaces else text
+
     def train(self, texts):
         texts = [
             self.clean_text(text)
             for text in texts]
         self.train_bpe(texts)
-        self.id_to_token = [token for token, id in self.vocab.items()]
+        self.update()

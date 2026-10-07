@@ -111,7 +111,7 @@ class Transformer(nn.Module):
             vocab_size
         )
 
-    def forward(self, ids, attention_mask=None, pe=False, log=False):
+    def forward(self, ids, attention_mask=None, pe=True, log=False):
         x = self.embedding(ids)
         if pe:
             x = x + self.pos_encoding[:x.size(0)]
