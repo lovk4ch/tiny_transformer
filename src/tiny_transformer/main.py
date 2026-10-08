@@ -1,7 +1,7 @@
 import argparse
 
-from trainer import Trainer
-from core.config import (
+from tiny_transformer.trainer import Trainer
+from tiny_transformer.core.config import (
     ModelConfig,
     TrainConfig,
     GenerationConfig, CheckpointConfig
@@ -64,8 +64,8 @@ def main():
 
     train_parser.add_argument(
         "--dataset",
-        default=TrainConfig.dataset,
-        help=f"Training dataset (default: {TrainConfig.dataset})"
+        default=TrainConfig.dataset_path,
+        help=f"Training dataset (default: {TrainConfig.dataset_path})"
     )
 
     # Evaluate
@@ -76,8 +76,8 @@ def main():
 
     evaluate_parser.add_argument(
         "--dataset",
-        default=TrainConfig.dataset,
-        help=f"Evaluation dataset (default: {TrainConfig.dataset})"
+        default=TrainConfig.dataset_path,
+        help=f"Evaluation dataset (default: {TrainConfig.dataset_path})"
     )
 
     # Generate
@@ -119,7 +119,7 @@ def main():
     train_config = TrainConfig(
         train_percent=getattr(args, "train_percent", TrainConfig.train_percent),
         epochs=getattr(args, "epochs", TrainConfig.epochs),
-        dataset=getattr(args, "dataset", TrainConfig.dataset),
+        dataset_path=getattr(args, "dataset", TrainConfig.dataset_path),
         learning_rate=getattr(args, "learning_rate", TrainConfig.learning_rate)
     )
 

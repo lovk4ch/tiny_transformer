@@ -5,10 +5,10 @@ import torch
 from torch import nn
 from tqdm import tqdm
 
-import logger
-from core.tokenizer import Tokenizer
-from core.transformer import Transformer
-from core.types.sampling import SamplingMethod
+from tiny_transformer import logger
+from tiny_transformer.core.tokenizer import Tokenizer
+from tiny_transformer.core.transformer import Transformer
+from tiny_transformer.core.types.sampling import SamplingMethod
 
 
 class Trainer:
@@ -24,7 +24,6 @@ class Trainer:
         self.ff_dim_size = model_config.ff_dim_size
         self.max_tokens = model_config.max_tokens
 
-        self.dataset = train_config.dataset
         self.epochs = train_config.epochs
         self.learning_rate = train_config.learning_rate
 
@@ -35,7 +34,7 @@ class Trainer:
 
         self.checkpoint_path = checkpoint_config.path
 
-        with open(self.dataset, "r", encoding="utf-8") as f:
+        with train_config.dataset_path.open("r", encoding="utf-8") as f:
             texts = [line.strip() for line in f if line.strip()]
 
         split = int(len(texts) * train_config.train_percent / 100)

@@ -1,6 +1,6 @@
 import torch
 
-from core.tokenizer import Tokenizer
+from tiny_transformer.core.tokenizer import Tokenizer
 
 
 def trace_predictions(
