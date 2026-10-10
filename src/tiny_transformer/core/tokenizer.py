@@ -9,11 +9,11 @@ class Tokenizer:
     allowed_chars = (
         "abcdefghijklmnopqrstuvwxyz"
         "0123456789"
-        ".,!?'\"-:Ġ"
+        ".,!?'\"\n-:Ġ"
     )
     punctuation = ".,!?'\"-:"
 
-    vocab_size = 5000
+    vocab_size = 10000
 
     def __init__(self):
         self.vocab = {
@@ -46,8 +46,10 @@ class Tokenizer:
             token for token, _id in self.vocab.items()
         ]
 
+    """
     def create_target(self, ids):
         return ids[1:]
+    """
 
     def create_attention_mask(self, ids):
         return ids != self.pad_id
@@ -65,10 +67,14 @@ class Tokenizer:
         ])
 
     def clean_text(self, text):
-        allowed = set(self.allowed_chars + " ")
+        allowed = set(self.allowed_chars + " \n")
 
         text = text.lower()
-        text = " ".join(text.split())
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        text = "\n".join(
+            " ".join(line.split())
+            for line in text.split("\n")
+        )
         text = "".join(
             char for char in text
             if char in allowed
@@ -117,10 +123,6 @@ class Tokenizer:
 
         for text in texts:
             text = self.clean_text(text)
-
-            # "dogs run fast"
-            # →
-            # "dogs Ġrun Ġfast"
             text = text.replace(" ", "Ġ")
 
             tokens.append(list(text))
@@ -152,23 +154,38 @@ class Tokenizer:
                 for _tokens in tokens
             ]
 
-    def prepare(self, text, max_len, eos=True):
-        ids = torch.tensor(self.encode(text, eos=eos))
-        target = self.create_target(ids)
+    def prepare(self, input_text, target_text, max_len, eos=False):
+        input_ids = self.encode(input_text, eos=False)
+        target_ids = self.encode(target_text, eos=False)
 
-        ids = self.pad(ids, max_len)
-        target = self.pad(target, max_len)
+        # Оставляем место хотя бы для одного токена ответа
+        input_ids = input_ids[:max_len - 1]
+        input_len = len(input_ids)
+        target_ids = target_ids[:max_len - input_len]
 
-        attention_mask = self.create_attention_mask(ids)
+        full_ids = input_ids + target_ids
+        full_ids.append(self.eos_id)
 
-        return ids, target, attention_mask
+        # Вход модели предсказывает следующий токен
+        ids = full_ids[:-1]
+        labels = full_ids[1:]
+
+        # Не обучаемся предсказывать токены входного контекста
+        labels[:max(0, input_len - 1)] = [-100] * max(0, input_len - 1)
+
+        # Padding
+        pad_len = max_len - 1 - len(ids)
+        ids += [self.pad_id] * pad_len
+        labels += [-100] * pad_len
+
+        ids = torch.tensor(ids)
+        labels = torch.tensor(labels)
+        attention_mask = ids != self.pad_id
+
+        return ids, labels, attention_mask
 
     def encode(self, text, eos=True):
         text = self.clean_text(text)
-
-        # "dogs run fast"
-        # →
-        # "dogs Ġrun Ġfast"
         text = text.replace(" ", "Ġ")
 
         tokens = list(text)
@@ -185,9 +202,9 @@ class Tokenizer:
 
     def decode(self, ids, whitespaces: bool=True) -> str:
         tokens = [
-            self.id_to_token[id.item()]
+            self.id_to_token[id]
             for id in ids
-            if id.item() not in (self.pad_id, self.eos_id)
+            if id not in (self.pad_id, self.eos_id)
         ]
 
         text = "".join(tokens)

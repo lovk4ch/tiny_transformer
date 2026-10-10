@@ -1,3 +1,4 @@
+import json
 import os
 import random
 
@@ -35,9 +36,12 @@ class Trainer:
         self.checkpoint_path = checkpoint_config.path
 
         with train_config.dataset_path.open("r", encoding="utf-8") as f:
-            texts = [line.strip() for line in f if line.strip()]
+            samples = json.load(f)[:500]
 
-        split = int(len(texts) * train_config.train_percent / 100)
+        inputs = [sample["input"] for sample in samples]
+        targets = [sample["target"] for sample in samples]
+
+        split = int(len(samples) * train_config.train_percent / 100)
 
         self.tokenizer = Tokenizer()
 
@@ -45,7 +49,7 @@ class Trainer:
         self.checkpoint_loaded = checkpoint is not None
 
         if not self.checkpoint_loaded:
-            self.prepare_tokenizer(texts[:split])
+            self.prepare_tokenizer(inputs[:split] + targets[:split])
 
         print("Tokenizer vocab:", self.tokenizer.vocab)
 
@@ -57,7 +61,7 @@ class Trainer:
         ).to(self.device)
 
         self.criterion = nn.CrossEntropyLoss(
-            ignore_index=self.tokenizer.pad_id
+            ignore_index=-100
         )
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(),
@@ -69,15 +73,16 @@ class Trainer:
             print("Model weights loaded")
 
         dataset = []
-        for text in texts:
-            ids, target, attention_mask = self.tokenizer.prepare(
-                text,
+        for sample in samples:
+            input_ids, target_ids, attention_mask = self.tokenizer.prepare(
+                sample["input"] + "\n",
+                sample["target"],
                 max_len=self.max_tokens
             )
-            dataset.append((ids, target, attention_mask))
+            dataset.append((input_ids, target_ids, attention_mask))
 
-        random.seed(42)
-        random.shuffle(dataset)
+        # random.seed(42)
+        # random.shuffle(dataset)
 
         self.train_dataset = dataset[:split]
         self.val_dataset = dataset[split:]
@@ -125,6 +130,7 @@ class Trainer:
                 attention_mask = attention_mask.to(self.device)
 
                 self.optimizer.zero_grad()
+
                 logits, log_data = self.model(
                     ids,
                     attention_mask=attention_mask,
@@ -133,17 +139,17 @@ class Trainer:
 
                 candidates = []
                 for i in range(len(logits)):
-                    values, indices = self.get_top_tokens(logits[i - 1])
-                    candidates.append((values, indices))
+                    if target[i] != -100:
+                        values, indices = self.get_top_tokens(logits[i - 1])
+                        candidates.append((values, indices))
 
-                """
                 log_pred = logger.trace_predictions(
                     ids=ids,
+                    target=target,
                     candidates=candidates,
                     tokenizer=self.tokenizer
                 )
-                text += log_pred + "\n\n"
-                """
+                # text += log_pred + "\n"
 
                 loss = self.criterion(logits, target)
                 loss.backward()
@@ -153,14 +159,14 @@ class Trainer:
 
             avg_loss = total_loss / len(self.train_dataset)
 
-            text = f"\nepoch={epoch}, loss={avg_loss:.3f}" + text
+            text = f"\nepoch={epoch}, loss={avg_loss:.3f}\n" + text
             tqdm.write(text)
+            self.save_checkpoint()
 
             if epoch >= self.epochs:
                 break
 
             epoch += 1
-        self.save_checkpoint()
 
     def evaluate(self):
         if not self.checkpoint_loaded:
@@ -187,11 +193,13 @@ class Trainer:
 
                 candidates = []
                 for i in range(len(logits)):
-                    values, indices = self.get_top_tokens(logits[i - 1])
-                    candidates.append((values, indices))
+                    if target[i] != -100:
+                        values, indices = self.get_top_tokens(logits[i - 1])
+                        candidates.append((values, indices))
 
                 log_pred = logger.trace_predictions(
                     ids=ids,
+                    target=target,
                     candidates=candidates,
                     tokenizer=self.tokenizer
                 )
@@ -214,19 +222,21 @@ class Trainer:
 
         tqdm.write("=============== GENERATE: ===============")
 
-        remaining = self.max_tokens - len(text.split())
+        remaining = self.max_tokens - len(text)
         if remaining < 0:
             print(text)
             print(f"--- too long sequence, max = {self.max_tokens}")
             return
 
         for i in range(remaining + 1):
-            ids, _, _ = self.tokenizer.prepare(
+            ids = self.tokenizer.encode(
                 text,
-                max_len=self.max_tokens,
                 eos=False
             )
-            ids = ids.to(self.device)
+            ids = torch.tensor(
+                ids,
+                device=self.device
+            )
 
             with torch.no_grad():
                 logits, log_data = self.model(

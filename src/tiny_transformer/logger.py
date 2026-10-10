@@ -5,24 +5,30 @@ from tiny_transformer.core.tokenizer import Tokenizer
 
 def trace_predictions(
     ids: torch.Tensor,
-    candidates: list[tuple[torch.Tensor, torch.Tensor]],
+    target: torch.Tensor,
+    candidates: list,
     tokenizer: Tokenizer
 ) -> str:
-    text = ["Sequence: " + tokenizer.decode(ids)]
+    text = ["Sequence:\n" + tokenizer.decode(ids)]
+    start = (target != -100).nonzero(as_tuple=True)[0][0].item()
 
     for i, (values, indices) in enumerate(candidates):
-        if ids[i - 1].item() == tokenizer.eos_id:
-            break
+        if target[i].item() == -100:
+            continue
 
-        pred = tokenizer.decode(ids[:i])
+        pred = tokenizer.decode(ids[:start + i])
+        expected = tokenizer.decode([target[start + i - 1]])
 
         tokens = " | ".join(
             f"{tokenizer.decode([token], False)}: {prob.item():.1%}"
             for token, prob in zip(indices, values)
         )
 
-        if pred:
-            text.append(pred + " --> " + tokens)
+        text.append(
+            f"\n{pred}\n"
+            f"--> expected:{expected}\n"
+            f"--> pred: {tokens}"
+        )
 
     return "\n".join(text) + "\n"
 
