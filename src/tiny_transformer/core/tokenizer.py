@@ -1,3 +1,4 @@
+import time
 from collections import Counter
 
 from sympy.printing.pytorch import torch
@@ -13,7 +14,8 @@ class Tokenizer:
     )
     punctuation = ".,!?'\"-:"
 
-    vocab_size = 10000
+    vocab_size = 5000
+    min_pair_frequency = 3
 
     def __init__(self):
         self.vocab = {
@@ -27,7 +29,7 @@ class Tokenizer:
             if char not in self.vocab:
                 self.vocab[char] = len(self.vocab)
 
-        self.vocab_size += len(self.vocab)
+        # self.vocab_size += len(self.vocab)
 
         self.eos_id = self.vocab["<eos>"]
         self.pad_id = self.vocab["<pad>"]
@@ -45,11 +47,6 @@ class Tokenizer:
         self.id_to_token = [
             token for token, _id in self.vocab.items()
         ]
-
-    """
-    def create_target(self, ids):
-        return ids[1:]
-    """
 
     def create_attention_mask(self, ids):
         return ids != self.pad_id
@@ -119,18 +116,44 @@ class Tokenizer:
         return merged
 
     def train_bpe(self, texts):
+        total_start = time.perf_counter()
         tokens = []
+
+        # 1. Подготовка текстов
+        t0 = time.perf_counter()
 
         for text in texts:
             text = self.clean_text(text)
             text = text.replace(" ", "Ġ")
-
             tokens.append(list(text))
 
+        prepare_time = time.perf_counter() - t0
+
+        print(
+            f"[BPE] texts={len(tokens)}, "
+            f"initial_chars={sum(map(len, tokens))}, "
+            f"prepare={prepare_time:.2f}s"
+        )
+
+        # Накопительные метрики
+        count_time = 0.0
+        select_time = 0.0
+        merge_time = 0.0
+        iteration = 0
+
         while len(self.vocab) < self.vocab_size:
+            iteration += 1
+
+            # 2. Подсчёт частот соседних пар
+            t0 = time.perf_counter()
             pair_counts = self.get_pair_counts(tokens)
-            if not pair_counts:
+            count_time += time.perf_counter() - t0
+
+            if not pair_counts or pair_counts.most_common(1)[0][1] < self.min_pair_frequency:
                 break
+
+            # 3. Выбор лучшей пары
+            t0 = time.perf_counter()
 
             best_pair = None
             best_token = None
@@ -141,7 +164,10 @@ class Tokenizer:
                 if new_token not in self.vocab:
                     best_token = new_token
                     best_pair = pair
+                    best_count = count
                     break
+
+            select_time += time.perf_counter() - t0
 
             if best_pair is None:
                 break
@@ -149,10 +175,41 @@ class Tokenizer:
             self.vocab[best_token] = len(self.vocab)
             self.merges.append(best_pair)
 
+            # 4. Применение merge ко всем текстам
+            t0 = time.perf_counter()
+
             tokens = [
                 self.merge_pair(_tokens, best_pair)
                 for _tokens in tokens
             ]
+
+            merge_time += time.perf_counter() - t0
+
+            # Печатаем метрики каждые 100 итераций
+            if iteration % 100 == 0 or iteration == 1:
+                elapsed = time.perf_counter() - total_start
+
+                print(
+                    f"[BPE] iter={iteration}, "
+                    f"vocab={len(self.vocab)}/{self.vocab_size}, "
+                    f"unique_pairs={len(pair_counts)}, "
+                    f"best_count={best_count}, "
+                    f"tokens_left={sum(map(len, tokens))}, "
+                    f"count={count_time:.2f}s, "
+                    f"select={select_time:.2f}s, "
+                    f"merge={merge_time:.2f}s, "
+                    f"total={elapsed:.2f}s"
+                )
+
+        print(
+            f"[BPE DONE] merges={iteration}, "
+            f"vocab={len(self.vocab)}, "
+            f"prepare={prepare_time:.2f}s, "
+            f"count={count_time:.2f}s, "
+            f"select={select_time:.2f}s, "
+            f"merge={merge_time:.2f}s, "
+            f"total={time.perf_counter() - total_start:.2f}s"
+        )
 
     def prepare(self, input_text, target_text, max_len, eos=False):
         input_ids = self.encode(input_text, eos=False)

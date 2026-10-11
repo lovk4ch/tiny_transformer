@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import random
 
@@ -25,8 +26,7 @@ class Trainer:
         self.ff_dim_size = model_config.ff_dim_size
         self.max_tokens = model_config.max_tokens
 
-        self.epochs = train_config.epochs
-        self.learning_rate = train_config.learning_rate
+        self.train_config = train_config
 
         self.temperature = generation_config.temperature
         self.top_k = generation_config.top_k
@@ -35,23 +35,12 @@ class Trainer:
 
         self.checkpoint_path = checkpoint_config.path
 
-        with train_config.dataset_path.open("r", encoding="utf-8") as f:
-            samples = json.load(f)[:500]
-
-        inputs = [sample["input"] for sample in samples]
-        targets = [sample["target"] for sample in samples]
-
-        split = int(len(samples) * train_config.train_percent / 100)
+        print("Preparing model...")
 
         self.tokenizer = Tokenizer()
 
         checkpoint = self.load_checkpoint()
         self.checkpoint_loaded = checkpoint is not None
-
-        if not self.checkpoint_loaded:
-            self.prepare_tokenizer(inputs[:split] + targets[:split])
-
-        print("Tokenizer vocab:", self.tokenizer.vocab)
 
         self.model = Transformer(
             vocab_size=len(self.tokenizer.vocab),
@@ -65,27 +54,20 @@ class Trainer:
         )
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(),
-            lr=self.learning_rate,
+            lr=self.train_config.learning_rate,
+        )
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer,
+            mode="min",
+            factor=0.5,
+            patience=5,
+            threshold=0.001,
+            min_lr=1e-6
         )
 
         if self.checkpoint_loaded:
             self.model.load_state_dict(checkpoint["model"])
             print("Model weights loaded")
-
-        dataset = []
-        for sample in samples:
-            input_ids, target_ids, attention_mask = self.tokenizer.prepare(
-                sample["input"] + "\n",
-                sample["target"],
-                max_len=self.max_tokens
-            )
-            dataset.append((input_ids, target_ids, attention_mask))
-
-        # random.seed(42)
-        # random.shuffle(dataset)
-
-        self.train_dataset = dataset[:split]
-        self.val_dataset = dataset[split:]
 
     def load_checkpoint(self):
         if not os.path.exists(self.checkpoint_path):
@@ -112,6 +94,36 @@ class Trainer:
             "model": self.model.state_dict(),
         }, self.checkpoint_path)
 
+    def load_dataset(self):
+        print("Loading dataset...")
+        with self.train_config.dataset_path.open(
+                "r",
+                encoding="utf-8"
+        ) as f:
+            samples = json.load(f)[:1500]
+
+        split = int(len(samples) * self.train_config.train_percent / 100)
+        print("Dataset loaded")
+
+        return samples[:split], samples[split:]
+
+    def encode_dataset(self, samples):
+        tqdm.write("Encoding dataset...")
+        embedded = []
+        for sample in samples:
+            ids, targets, mask = self.tokenizer.prepare(
+                sample["input"] + "\n",
+                sample["target"],
+                max_len=self.max_tokens,
+            )
+            embedded.append((ids, targets, mask))
+
+        # random.seed(42)
+        # random.shuffle(embedded)
+
+        tqdm.write("Embeddings created")
+        return embedded
+
     def prepare_tokenizer(self, texts):
         print("Training tokenizer...")
         self.tokenizer.train(texts)
@@ -119,11 +131,25 @@ class Trainer:
         print(f"Vocab volume: {len(self.tokenizer.vocab)} tokens")
 
     def train(self):
+        samples, _ = self.load_dataset()
+
+        if not self.checkpoint_loaded:
+            inputs = [s["input"] for s in samples]
+            targets = [s["target"] for s in samples]
+            self.prepare_tokenizer(inputs + targets)
+
+        logger.print_tokenizer_vocab(self.tokenizer)
+        train_dataset = self.encode_dataset(samples)
+
         epoch = 1
+        log_id = int(random.random() * len(train_dataset))
+        tqdm.write("=============== TRAINING: ===============")
+
         while True:
             total_loss = 0
+            id = 0
             text = ""
-            pbar = tqdm(self.train_dataset, desc=f"\033[99mepoch {epoch}")
+            pbar = tqdm(train_dataset, desc=f"\033[99mepoch {epoch}")
             for ids, target, attention_mask in pbar:
                 ids = ids.to(self.device)
                 target = target.to(self.device)
@@ -143,27 +169,35 @@ class Trainer:
                         values, indices = self.get_top_tokens(logits[i - 1])
                         candidates.append((values, indices))
 
-                log_pred = logger.trace_predictions(
-                    ids=ids,
-                    target=target,
-                    candidates=candidates,
-                    tokenizer=self.tokenizer
-                )
-                # text += log_pred + "\n"
+                if id == log_id:
+                    logger.trace_predictions(
+                        id=id,
+                        ids=ids,
+                        target=target,
+                        logits=logits,
+                        tokenizer=self.tokenizer,
+                        get_top_tokens=self.get_top_tokens
+                    )
 
                 loss = self.criterion(logits, target)
                 loss.backward()
                 self.optimizer.step()
                 total_loss += loss.item()
                 pbar.set_postfix(loss=f"{loss.item():.3f}")
+                id += 1
 
-            avg_loss = total_loss / len(self.train_dataset)
+            avg_loss = total_loss / len(train_dataset)
+            self.scheduler.step(avg_loss)
 
-            text = f"\nepoch={epoch}, loss={avg_loss:.3f}\n" + text
+            text = ((f"\nepoch={epoch}, "
+                    f"loss={avg_loss:.3f}, "
+                    f"accuracy={100 * math.exp(-avg_loss):.1f}%, "
+                    f"lr={self.optimizer.param_groups[0]['lr']:.7f}\n")
+                    + text)
             tqdm.write(text)
             self.save_checkpoint()
 
-            if epoch >= self.epochs:
+            if epoch >= self.train_config.epochs:
                 break
 
             epoch += 1
@@ -173,10 +207,18 @@ class Trainer:
             print("Weights not found. Train model first.")
             return
 
+        logger.print_tokenizer_vocab(self.tokenizer)
+
+        _, samples = self.load_dataset()
+        val_dataset = self.encode_dataset(samples)
+
         self.model.eval()
+
+        log_id = int(random.random() * len(val_dataset))
+        id = 0
         total_loss = 0.0
         text = ""
-        pbar = tqdm(self.val_dataset)
+        pbar = tqdm(val_dataset)
         tqdm.write("=============== EVALUATE: ===============")
 
         with torch.no_grad():
@@ -197,18 +239,25 @@ class Trainer:
                         values, indices = self.get_top_tokens(logits[i - 1])
                         candidates.append((values, indices))
 
-                log_pred = logger.trace_predictions(
-                    ids=ids,
-                    target=target,
-                    candidates=candidates,
-                    tokenizer=self.tokenizer
-                )
-                text += log_pred + "\n\n"
+                if id == log_id:
+                    logger.trace_predictions(
+                        id=id,
+                        ids=ids,
+                        target=target,
+                        logits=logits,
+                        tokenizer=self.tokenizer,
+                        get_top_tokens=self.get_top_tokens
+                    )
 
                 loss = self.criterion(logits, target)
                 total_loss += loss.item()
+                id += 1
 
-        text = f"loss={total_loss / len(self.val_dataset):.3f}\n" + text
+        avg_loss = total_loss / len(val_dataset)
+
+        text = ((f"loss={avg_loss:.3f}, "
+                f"accuracy={100 * math.exp(-avg_loss):.1f}%\n")
+                + text)
         tqdm.write(text)
 
         self.model.train()
@@ -218,15 +267,18 @@ class Trainer:
             print("Weights not found. Train model first.")
             return
 
-        self.model.eval()
-
-        tqdm.write("=============== GENERATE: ===============")
+        logger.print_tokenizer_vocab(self.tokenizer)
 
         remaining = self.max_tokens - len(text)
         if remaining < 0:
             print(text)
-            print(f"--- too long sequence, max = {self.max_tokens}")
+            print(f"--- too long sequence {len(text)}, "
+                  f"max = {self.max_tokens}")
             return
+
+        self.model.eval()
+        text += "\n"
+        tqdm.write("=============== GENERATE: ===============")
 
         for i in range(remaining + 1):
             ids = self.tokenizer.encode(
@@ -244,17 +296,26 @@ class Trainer:
                     log=True
                 )
 
-            values, indices = self.get_top_tokens(logits[i])
+            values, indices = self.get_top_tokens(logits[-1])
 
             if self.sampling == SamplingMethod.GREEDY:
                 next_token = indices[0]
             else:
                 next_token = indices[torch.multinomial(values, 1)]
 
+            logger.trace_generations(
+                step=i,
+                ids=ids,
+                logits=logits,
+                selected_id=next_token.item(),
+                tokenizer=self.tokenizer,
+                get_top_tokens=self.get_top_tokens,
+            )
+
             text += self.tokenizer.decode([next_token])
 
             if next_token.item() == self.tokenizer.eos_id:
-                print(text + ".")
+                print(text)
                 break
 
             if i == remaining:

@@ -146,7 +146,7 @@ def main():
             trainer.evaluate()
 
         case "generate":
-            for i in range(10):
+            for i in range(1):
                 trainer.generate(args.prompt)
 
 
