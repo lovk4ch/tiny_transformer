@@ -12,7 +12,7 @@ MODELS_DIR = PROJECT_ROOT / "models"
 @dataclass
 class GenerationConfig:
     temperature: float = 1.0
-    top_k: int = 3
+    top_k: int = 1
     top_p: float = 0.9
     sampling: SamplingMethod = SamplingMethod.TOP_K
 
@@ -28,8 +28,8 @@ class CheckpointConfig:
 
 @dataclass
 class TrainConfig:
-    train_percent: float = 90
+    train_percent: float = 100
     epochs: int = 100
-    learning_rate: float = 1e-3
-    dataset_path: Path = DATA_DIR / "tinypairs-10k.json"
+    learning_rate: float = 5e-3
+    dataset_path: Path = DATA_DIR / "tinypairs-mini.json"
 

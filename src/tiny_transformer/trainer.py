@@ -33,14 +33,76 @@ class Trainer:
         self.top_p = generation_config.top_p
         self.sampling = generation_config.sampling
 
+        self.tokenizer = Tokenizer()
+        self.model = None
+        self.criterion = None
+        self.optimizer = None
+        self.scheduler = None
+
         self.checkpoint_path = checkpoint_config.path
 
-        print("Preparing model...")
-
-        self.tokenizer = Tokenizer()
-
+    def initialize(self, pretrained_only=True):
+        # checkpoint
         checkpoint = self.load_checkpoint()
-        self.checkpoint_loaded = checkpoint is not None
+        if pretrained_only and not checkpoint:
+            raise FileNotFoundError(
+                "Checkpoint not found. Train the model first."
+            )
+
+        # tokenizer
+        self.initialize_vocab(checkpoint)
+
+        # model
+        self.initialize_model(checkpoint)
+
+    def load_checkpoint(self):
+        if not os.path.exists(self.checkpoint_path):
+            print("Weights not found")
+            return None
+
+        checkpoint = torch.load(
+            self.checkpoint_path,
+            weights_only=True,
+            map_location=self.device
+        )
+
+        required = {"model", "vocab", "merges"}
+        if not isinstance(checkpoint, dict) or not required.issubset(checkpoint):
+            raise ValueError("Invalid checkpoint: missing required fields")
+
+        if not isinstance(checkpoint["vocab"], dict):
+            raise ValueError("Invalid checkpoint vocab")
+
+        if not isinstance(checkpoint["merges"], list):
+            raise ValueError("Invalid checkpoint merges")
+
+        return checkpoint
+
+    def save_checkpoint(self):
+        torch.save({
+            "vocab": self.tokenizer.vocab,
+            "merges": self.tokenizer.merges,
+            "model": self.model.state_dict(),
+        }, self.checkpoint_path)
+
+    def initialize_vocab(self, checkpoint=None):
+        if checkpoint is None:
+            samples, _ = self.load_dataset()
+            inputs = [s["input"] for s in samples]
+            targets = [s["target"] for s in samples]
+            self.tokenizer.train(inputs + targets)
+        else:
+            self.tokenizer.update(
+                checkpoint["vocab"],
+                checkpoint["merges"]
+            )
+            print("Tokenizer loaded from checkpoint")
+
+        print(f"Vocab volume: {len(self.tokenizer.vocab)} tokens")
+        logger.print_tokenizer_vocab(self.tokenizer)
+
+    def initialize_model(self, checkpoint=None):
+        print("Preparing model...")
 
         self.model = Transformer(
             vocab_size=len(self.tokenizer.vocab),
@@ -61,50 +123,39 @@ class Trainer:
             mode="min",
             factor=0.5,
             patience=5,
-            threshold=0.001,
+            threshold=0.01,
             min_lr=1e-6
         )
 
-        if self.checkpoint_loaded:
+        if checkpoint is not None:
             self.model.load_state_dict(checkpoint["model"])
             print("Model weights loaded")
 
-    def load_checkpoint(self):
-        if not os.path.exists(self.checkpoint_path):
-            print("Weights not found")
-            return None
-
-        checkpoint = torch.load(
-            self.checkpoint_path,
-            map_location=self.device
-        )
-
-        self.tokenizer.update(
-            checkpoint["vocab"],
-            checkpoint["merges"]
-        )
-
-        print("Tokenizer loaded from checkpoint")
-        return checkpoint
-
-    def save_checkpoint(self):
-        torch.save({
-            "vocab": self.tokenizer.vocab,
-            "merges": self.tokenizer.merges,
-            "model": self.model.state_dict(),
-        }, self.checkpoint_path)
-
     def load_dataset(self):
         print("Loading dataset...")
-        with self.train_config.dataset_path.open(
-                "r",
-                encoding="utf-8"
-        ) as f:
-            samples = json.load(f)[:1500]
+        path = self.train_config.dataset_path
 
-        split = int(len(samples) * self.train_config.train_percent / 100)
+        try:
+            with path.open(
+                    "r", encoding="utf-8"
+            ) as f:
+                samples = json.load(f)[:1500]
+
+        except FileNotFoundError as e:
+            raise FileNotFoundError(
+                f"Dataset not found: {path}"
+            ) from e
+
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"Invalid JSON in dataset: {path}"
+            ) from e
+
+        split = int(
+            len(samples) * self.train_config.train_percent / 100
+        )
+
         print("Dataset loaded")
-
         return samples[:split], samples[split:]
 
     def encode_dataset(self, samples):
@@ -124,21 +175,10 @@ class Trainer:
         tqdm.write("Embeddings created")
         return embedded
 
-    def prepare_tokenizer(self, texts):
-        print("Training tokenizer...")
-        self.tokenizer.train(texts)
-
-        print(f"Vocab volume: {len(self.tokenizer.vocab)} tokens")
-
     def train(self):
+        self.initialize(pretrained_only=False)
+
         samples, _ = self.load_dataset()
-
-        if not self.checkpoint_loaded:
-            inputs = [s["input"] for s in samples]
-            targets = [s["target"] for s in samples]
-            self.prepare_tokenizer(inputs + targets)
-
-        logger.print_tokenizer_vocab(self.tokenizer)
         train_dataset = self.encode_dataset(samples)
 
         epoch = 1
@@ -203,11 +243,7 @@ class Trainer:
             epoch += 1
 
     def evaluate(self):
-        if not self.checkpoint_loaded:
-            print("Weights not found. Train model first.")
-            return
-
-        logger.print_tokenizer_vocab(self.tokenizer)
+        self.initialize()
 
         _, samples = self.load_dataset()
         val_dataset = self.encode_dataset(samples)
@@ -263,11 +299,7 @@ class Trainer:
         self.model.train()
 
     def generate(self, text):
-        if not self.checkpoint_loaded:
-            print("Weights not found. Train model first.")
-            return
-
-        logger.print_tokenizer_vocab(self.tokenizer)
+        self.initialize()
 
         remaining = self.max_tokens - len(text)
         if remaining < 0:

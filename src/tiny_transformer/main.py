@@ -94,21 +94,21 @@ def main():
     generate_parser.add_argument(
         "--temperature",
         type=float,
-        default=1.0,
+        default=GenerationConfig.temperature,
         help="Sampling temperature (default: 1.0)"
     )
 
     generate_parser.add_argument(
         "--top-k",
         type=int,
-        default=3,
+        default=GenerationConfig.top_k,
         help="Number of top tokens for Top-K sampling (default: 3)"
     )
 
     generate_parser.add_argument(
         "--top-p",
         type=int,
-        default=0.9,
+        default=GenerationConfig.top_p,
         help="Cumulative probability for Top-P sampling (default: 0.9)"
     )
 
