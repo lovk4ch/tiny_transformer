@@ -63,7 +63,7 @@ class Tokenizer:
             )
         ])
 
-    def clean_text(self, text):
+    def clean_text(self, text) -> str:
         allowed = set(self.allowed_chars + " \n")
 
         text = text.lower()
@@ -79,7 +79,7 @@ class Tokenizer:
 
         return text
 
-    def get_pair_counts(self, texts):
+    def get_pair_counts(self, texts) -> Counter:
         counts = Counter()
 
         for text in texts:
@@ -241,7 +241,7 @@ class Tokenizer:
 
         return ids, labels, attention_mask
 
-    def encode(self, text, eos=True):
+    def encode(self, text, eos=True) -> list[int]:
         text = self.clean_text(text)
         text = text.replace(" ", "Ġ")
 

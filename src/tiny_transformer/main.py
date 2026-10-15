@@ -114,7 +114,14 @@ def main():
 
     args = parser.parse_args()
 
+    generation_config = GenerationConfig(
+        temperature=getattr(args, "temperature", GenerationConfig.temperature),
+        top_k=getattr(args, "top_k", GenerationConfig.top_k),
+        top_p=getattr(args, "top_p", GenerationConfig.top_p)
+    )
+
     model_config = ModelConfig()
+    checkpoint_config = CheckpointConfig()
 
     train_config = TrainConfig(
         train_percent=getattr(args, "train_percent", TrainConfig.train_percent),
@@ -123,19 +130,11 @@ def main():
         learning_rate=getattr(args, "learning_rate", TrainConfig.learning_rate)
     )
 
-    generation_config = GenerationConfig(
-        temperature=getattr(args, "temperature", 1.0),
-        top_k=getattr(args, "top_k", 3),
-        top_p=getattr(args, "top_p", 0.9)
-    )
-
-    checkpoint_config = CheckpointConfig()
-
     trainer = Trainer(
         generation_config=generation_config,
         model_config=model_config,
-        train_config=train_config,
-        checkpoint_config=checkpoint_config
+        checkpoint_config=checkpoint_config,
+        train_config=train_config
     )
 
     match args.command:
