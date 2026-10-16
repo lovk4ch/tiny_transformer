@@ -15,7 +15,7 @@ class Tokenizer:
     punctuation = ".,!?'\"-:"
 
     vocab_size = 5000
-    min_pair_frequency = 3
+    min_pair_frequency = 1
 
     def __init__(self):
         self.vocab = {
