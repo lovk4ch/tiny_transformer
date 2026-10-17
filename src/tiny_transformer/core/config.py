@@ -28,8 +28,7 @@ class CheckpointConfig:
 
 @dataclass
 class TrainConfig:
-    train_percent: float = 100
+    train_percent: float = 90
     epochs: int = 50
     learning_rate: float = 5e-3
-    dataset_path: Path = DATA_DIR / "tinypairs-mini.json"
-
+    dataset_path: Path = DATA_DIR / "tinypairs-wisdom-quotes.json"
