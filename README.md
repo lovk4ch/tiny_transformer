@@ -24,5 +24,5 @@ python -m tiny-transformer evaluate
 python -m tiny-transformer generate "the cat"
 
 # Examples
-"I regret about my life."
+"I regret about my life."  
 "The future is built as the light from your own flame."
